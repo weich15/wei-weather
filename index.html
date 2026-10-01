@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>台灣氣象即時資訊儀表板</title>
+  
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    body {
+      background-color: #070b12;
+      color: #f1f5f9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding: max(14px, env(safe-area-inset-top)) 12px 48px 12px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .app-container { width: 100%; max-width: 440px; display: flex; flex-direction: column; gap: 14px; }
+
+    /* 共用深色毛玻璃卡片 */
+    .card {
+      background: rgba(14, 22, 41, 0.75);
+      border: 1px solid #1c2b4a;
+      border-radius: 18px;
+      padding: 16px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+    }
+    .inner-card {
+      background: #0b1326;
+      border: 1px solid #182542;
+      border-radius: 14px;
+      padding: 12px;
+    }
+
+    /* 按鈕樣式 */
+    .btn {
+      border: none;
+      outline: none;
+      border-radius: 10px;
+      padding: 6px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.15s ease-in-out;
+      touch-action: manipulation;
+    }
+    .btn-ghost { background: #131d36; color: #7dd3fc; border: 1px solid #22355c; }
+    .btn-active { background: #0284c7; color: #fff; font-weight: bold; border: 1px solid #38bdf8; }
+    .btn:active { transform: scale(0.96); }
+
+    /* 頂部功能橫向導覽列 */
+    .nav-tabs {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      white-space: nowrap;
+      padding-bottom: 2px;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .nav-tabs::-webkit-scrollbar { display: none; }
+    .nav-tab-btn {
+      padding: 7px 14px;
+      font-size: 12px;
+      border-radius: 10px;
+      background: #131d36;
+      color: #94a3b8;
+      border: 1px solid #22355c;
+    }
+    .nav-tab-btn.active {
+      background: #0284c7;
+      color: #ffffff;
+      border-color: #38bdf8;
+      font-weight: bold;
+    }
+
+    .flex-between { display: flex; align-items: center; justify-content: space-between; }
+    .flex-center { display: flex; align-items: center; gap: 6px; }
+
+    /* 縣市下拉選單 */
+    .select-box {
+      width: 100%;
+      background: #0b1326;
+      border: 1px solid #22355c;
+      color: #f8fafc;
+      border-radius: 10px;
+      padding: 10px;
+      font-size: 15px;
+      outline: none;
+      margin-top: 6px;
+      -webkit-appearance: none;
+    }
+
+    /* 網格佈局 */
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+
+    /* 配色輔助 */
+    .text-dim { color: #64748b; font-size: 11px; }
+    .text-sky { color: #38bdf8; }
+    .text-amber { color: #f59e0b; }
+    .text-emerald { color: #10b981; }
+    .badge {
+      font-size: 11px;
+      background: rgba(6, 78, 59, 0.6);
+      color: #34d399;
+      border: 1px solid rgba(5, 150, 105, 0.4);
+      padding: 2px 8px;
+      border-radius: 12px;
+    }
+
+    /* 圖片外框樣式 */
+    .weather-img-box {
+      width: 100%;
+      background: #0b1326;
+      border: 1px solid #182542;
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 220px;
+    }
+    .weather-img-box img {
+      width: 100%;
+      height: auto;
+      display: block;
+      object-fit: contain;
+    }
+
+    /* 捲動滑動錨點滑順效果 */
+    html { scroll-behavior: smooth; }
+  </style>
+
+  <!-- Leaflet 地圖函式庫 (颱風模組專用) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+
+  <div class="app-container">
+
+    <!-- 1. 頂部功能導覽列 (支援平滑捲動跳轉) -->
+    <div class="nav-tabs">
+      <button class="btn nav-tab-btn active" onclick="scrollToSec('sec-overview', this)">觀測儀表板</button>
+      <button class="btn nav-tab-btn" onclick="scrollToSec('sec-alert', this)">即時示警</button>
+      <button class="btn nav-tab-btn" onclick="scrollToSec('sec-city-forecast', this)">縣市預報</button>
+      <button class="btn nav-tab-btn" onclick="scrollToSec('sec-ranking', this)">極值排行</button>
+      <button class="btn nav-tab-btn" onclick="scrollToSec('sec-charts', this)">天氣圖資</button>
+      <button class="btn nav-tab-btn" onclick="scrollToSec('sec-typhoon', this)">颱風動態</button>
+    </div>
+
+    <!-- 2. 標題與手動重新整理按鈕 -->
+    <div class="flex-between" id="sec-overview">
+      <div class="flex-center">
+        <span style="font-size: 22px;">🌤️</span>
+        <h1 style="font-size: 20px; font-weight: 800; letter-spacing: -0.5px;">天氣即時資訊</h1>
+      </div>
+      <button class="btn btn-ghost" id="refresh-all-btn">
+        <span id="refresh-icon">🔄</span> 重新整理
+      </button>
+    </div>
+
+    <!-- 3. 即時日期與秒數時鐘長條 -->
+    <div class="inner-card flex-between" style="padding: 9px 12px; font-size: 12px; color: #94a3b8;">
+      <span id="current-date">載入中...</span>
+      <span id="current-time" style="color: #38bdf8; font-weight: 600;">--:--:--</span>
+    </div>
+
+    <!-- 4. 即時警特報與防災快訊 (有感地震報告) -->
+    <div class="card" id="sec-alert" style="border-color: rgba(245, 158, 11, 0.4); background: linear-gradient(135deg, rgba(69, 26, 3, 0.3), rgba(15, 23, 42, 0.75));">
+      <div class="flex-between" style="margin-bottom: 8px;">
+        <div class="flex-center" style="color: #f59e0b; font-weight: bold; font-size: 13px;">
+          ⚠️ 即時警特報與防災快訊
+        </div>
+        <span style="font-size: 11px; background: rgba(180, 83, 9, 0.35); color: #fcd34d; padding: 2px 7px; border-radius: 6px;">最新快訊 〉</span>
+      </div>
+      <div class="inner-card">
+        <div style="font-size: 13px; font-weight: bold; color: #fbbf24;" id="eq-title">顯著有感地震報告</div>
+        <div style="font-size: 12px; color: #cbd5e1; margin-top: 4px;" id="eq-content">地震測網即時連線中...</div>
+        <div style="font-size: 10px; color: #64748b; margin-top: 4px;" id="eq-time">--</div>
+      </div>
+    </div>
+
+    <!-- 5. 您目前所在位置天氣 (GPS 定位測站) -->
+    <div class="card">
+      <div class="flex-between" style="border-bottom: 1px solid #1c2b4a; padding-bottom: 8px; margin-bottom: 12px;">
+        <div class="flex-center" style="font-size: 13px; font-weight: bold; color: #38bdf8;">
+          🎯 您目前所在位置天氣
+        </div>
+        <button class="btn btn-ghost" id="locate-btn" style="font-size: 11px; padding: 4px 8px;">更新定位</button>
+      </div>
+
+      <div class="flex-between">
+        <div>
+          <div style="font-size: 17px; font-weight: bold;" id="loc-station-name">定位中...</div>
+          <div class="text-dim" style="margin-top: 2px;" id="loc-distance-info">計算離您最近測站中...</div>
+        </div>
+        <div style="text-align: right;">
+          <div style="font-size: 28px; font-weight: 900;" id="loc-temp">--.- °C</div>
+          <div style="font-size: 12px; color: #38bdf8;" id="loc-pop">降雨機率: --%</div>
+        </div>
+      </div>
+
+      <div class="grid-2 inner-card" style="margin-top: 12px; font-size: 12px; color: #cbd5e1;">
+        <div id="loc-wind">風速: -- m/s</div>
+        <div id="loc-humidity">相對濕度: -- %</div>
+        <div id="loc-rain">日累積雨量: -- mm</div>
+        <div class="text-emerald" id="loc-status">空氣品質良好</div>
+      </div>
+    </div>
+
+    <!-- 6. 即時氣象排行榜 TOP 10 (高溫 / 低溫切換) -->
+    <div class="card" id="sec-ranking">
+      <div class="flex-between" style="margin-bottom: 10px;">
+        <div class="flex-center" style="font-size: 13px; font-weight: bold;">
+          🏆 即時氣象排行榜 TOP 10
+        </div>
+        <span class="text-dim" id="rank-update-time">--:--</span>
+      </div>
+
+      <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+        <button class="btn btn-active" id="rank-tab-high" style="font-size: 11px;">🌡️ 高溫排行</button>
+        <button class="btn btn-ghost" id="rank-tab-low" style="font-size: 11px;">❄️ 低溫排行</button>
+      </div>
+
+      <!-- 雙欄卡片網格 -->
+      <div class="grid-2" id="ranking-container">
+        <div style="grid-column: span 2; text-align: center; color: #64748b; font-size: 12px; padding: 20px 0;">
+          正在統計全台測站極值...
+        </div>
+      </div>
+    </div>
+
+    <!-- 7. 縣市天氣預報選擇器 (F-C0032-001) -->
+    <div class="card" id="sec-city-forecast" style="padding: 12px 14px;">
+      <label style="font-size: 11px; color: #94a3b8;">選擇縣市預報</label>
+      <select id="city-select" class="select-box">
+        <option value="臺北市">臺北市</option>
+        <option value="新北市">新北市</option>
+        <option value="基隆市">基隆市</option>
+        <option value="桃園市">桃園市</option>
+        <option value="新竹市">新竹市</option>
+        <option value="新竹縣">新竹縣</option>
+        <option value="苗栗縣">苗栗縣</option>
+        <option value="臺中市">臺中市</option>
+        <option value="彰化縣">彰化縣</option>
+        <option value="南投縣">南投縣</option>
+        <option value="雲林縣">雲林縣</option>
+        <option value="嘉義市">嘉義市</option>
+        <option value="嘉義縣">嘉義縣</option>
+        <option value="臺南市">臺南市</option>
+        <option value="高雄市">高雄市</option>
+        <option value="屏東縣">屏東縣</option>
+        <option value="宜蘭縣">宜蘭縣</option>
+        <option value="花蓮縣">花蓮縣</option>
+        <option value="臺東縣">臺東縣</option>
+        <option value="澎湖縣">澎湖縣</option>
+        <option value="金門縣">金門縣</option>
+        <option value="連江縣">連江縣</option>
+      </select>
+    </div>
+
+    <!-- 選擇狀態提示綠點 -->
+    <div style="font-size: 12px; color: #94a3b8; display: flex; align-items: center; gap: 6px; padding: 0 4px;">
+      <span style="width: 8px; height: 8px; border-radius: 50%; background: #34d399; display: inline-block;"></span>
+      <span id="update-status">已選擇：臺北市 | 資料載入中...</span>
+    </div>
+
+    <!-- 8. 縣市天氣狀況大卡 (截圖 11) -->
+    <div class="card" style="display: flex; flex-direction: column; gap: 14px;">
+      <div class="flex-between" style="border-bottom: 1px solid #1c2b4a; padding-bottom: 10px;">
+        <h2 id="card-city-title" style="font-size: 16px; font-weight: bold;">臺北市 | 天氣即時資訊</h2>
+        <span class="badge">CWA 官方資料</span>
+      </div>
+
+      <!-- 當前天氣大框 -->
+      <div class="inner-card" style="text-align: center; padding: 16px 12px;">
+        <div style="font-size: 12px; color: #94a3b8; text-align: left; margin-bottom: 8px;">當前天氣狀況</div>
+        <div id="wx-icon" style="font-size: 46px; margin: 4px 0;">🌤️</div>
+        <div id="wx-text" style="font-size: 22px; font-weight: bold; margin-bottom: 14px;">載入中...</div>
+        
+        <div class="flex-between" style="border-top: 1px solid #182542; padding-top: 10px; font-size: 12px; color: #cbd5e1;">
+          <div>降雨機率：<strong id="pop-value" class="text-sky">--%</strong></div>
+          <div>體感舒適度：<strong id="ci-value" style="color: #f1f5f9;">--</strong></div>
+        </div>
+      </div>
+
+      <!-- 最高溫 / 最低溫 雙格 -->
+      <div class="grid-2">
+        <div class="inner-card flex-center" style="gap: 12px; padding: 12px;">
+          <div style="width: 40px; height: 40px; border-radius: 10px; background: rgba(225, 29, 72, 0.15); display: flex; align-items: center; justify-content: center; font-size: 18px; color: #fb7185;">
+            🌡️
+          </div>
+          <div>
+            <div class="text-dim">最高氣溫</div>
+            <div id="max-temp" style="font-size: 20px; font-weight: 800;">-- °C</div>
+          </div>
+        </div>
+
+        <div class="inner-card flex-center" style="gap: 12px; padding: 12px;">
+          <div style="width: 40px; height: 40px; border-radius: 10px; background: rgba(2, 132, 199, 0.15); display: flex; align-items: center; justify-content: center; font-size: 18px; color: #38bdf8;">
+            ❄️
+          </div>
+          <div>
+            <div class="text-dim">最低氣溫</div>
+            <div id="min-temp" style="font-size: 20px; font-weight: 800;">-- °C</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 9. 今明 36 小時三時段趨勢 (每 12 小時時段) -->
+    <div class="card" style="display: flex; flex-direction: column; gap: 12px;">
+      <div class="flex-between" style="border-bottom: 1px solid #1c2b4a; padding-bottom: 8px;">
+        <span style="font-size: 13px; font-weight: bold; color: #38bdf8;">📅 今明 36 小時預報</span>
+        <span class="text-dim">三時段推移</span>
+      </div>
+
+      <div class="grid-3" id="forecast-36h-container">
+        <div class="inner-card" style="text-align: center; padding: 8px 4px;">
+          <div class="text-dim">載入中...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 10. 代表性測站 6 宮格即時觀測 (截圖 10) -->
+    <div class="card" style="display: flex; flex-direction: column; gap: 12px;">
+      <div class="flex-between" style="border-bottom: 1px solid #1c2b4a; padding-bottom: 10px;">
+        <div class="flex-center">
+          <span style="color: #38bdf8;">📍</span>
+          <span style="font-size: 14px; font-weight: bold;" id="obs-station-name">代表性測站：載入中</span>
+        </div>
+        <span class="text-dim" style="font-family: monospace;" id="obs-station-id">ID: ----</span>
+      </div>
+
+      <div class="grid-3">
+        <div class="inner-card" style="text-align: center;">
+          <div style="font-size: 14px; margin-bottom: 2px;">🌡️</div>
+          <div class="text-dim">即時氣溫</div>
+          <div id="obs-temp" style="font-size: 15px; font-weight: bold; margin-top: 4px;">-- °C</div>
+        </div>
+
+        <div class="inner-card" style="text-align: center;">
+          <div style="font-size: 14px; margin-bottom: 2px;">💨</div>
+          <div class="text-dim">風速</div>
+          <div id="obs-wind" style="font-size: 15px; font-weight: bold; margin-top: 4px;">-- m/s</div>
+        </div>
+
+        <div class="inner-card" style="text-align: center;">
+          <div style="font-size: 14px; margin-bottom: 2px;">🧭</div>
+          <div class="text-dim">風向</div>
+          <div id="obs-dir" style="font-size: 15px; font-weight: bold; margin-top: 4px;">--°</div>
+        </div>
+
+        <div class="inner-card" style="text-align: center;">
+          <div style="font-size: 14px; margin-bottom: 2px;">💧</div>
+          <div class="text-dim">相對濕度</div>
+          <div id="obs-humidity" style="font-size: 15px; font-weight: bold; margin-top: 4px;">--%</div>
+        </div>
+
+        <div class="inner-card" style="text-align: center;">
+          <div style="font-size: 14px; margin-bottom: 2px;">🌧️</div>
+          <div class="text-dim">今日雨量</div>
+          <div id="obs-rain" style="font-size: 15px; font-weight: bold; margin-top: 4px; color: #38bdf8;">-- mm</div>
+        </div>
+
+        <div class="inner-card" style="text-align: center;">
+          <div style="font-size: 14px; margin-bottom: 2px;">🕒</div>
+          <div class="text-dim">觀測時間</div>
+          <div id="obs-time" style="font-size: 14px; font-weight: bold; margin-top: 4px;">--:--</div>
+        </div>
+      </div>
+
+      <div style="text-align: center; font-size: 11px; color: #64748b; padding-top: 4px;">
+        以上氣溫、風速、濕度與雨量均來自 CWA 自動氣象站 (O-A0001-001)
+      </div>
+    </div>
+
+    <!-- 11. 官方天氣圖 & 降雨預報圖 (F-C0035-003 & F-C0035-015) -->
+    <div class="card" id="sec-charts" style="display: flex; flex-direction: column; gap: 12px;">
+      <div class="flex-between">
+        <span style="font-size: 13px; font-weight: bold; color: #f59e0b;">🗺️ 官方氣象圖資</span>
+        <div style="display: flex; gap: 6px;">
+          <button id="btn-chart-synoptic" class="btn btn-active" style="padding: 4px 8px; font-size: 11px;">地面天氣圖</button>
+          <button id="btn-chart-rainfall" class="btn btn-ghost" style="padding: 4px 8px; font-size: 11px;">降雨預報圖</button>
+        </div>
+      </div>
+
+      <div class="weather-img-box">
+        <img id="weather-image" src="" alt="天氣圖載入中..." />
+      </div>
+
+      <div class="flex-between text-dim">
+        <span id="chart-desc">最新地面天氣圖 (F-C0035-003)</span>
+        <span id="chart-time">官方即時發布</span>
+      </div>
+    </div>
+
+    <!-- 12. 颱風路徑與預報潛勢地圖 (W-C0034-005) -->
+    <div class="card" id="sec-typhoon" style="display: flex; flex-direction: column; gap: 12px;">
+      <div class="flex-between">
+        <div class="flex-center">
+          <span style="font-size: 16px;">🌀</span>
+          <span style="font-size: 14px; font-weight: bold;" id="typhoon-name">颱風動態確認中...</span>
+        </div>
+        <span class="badge" id="typhoon-badge">即時監測</span>
+      </div>
+
+      <div id="typhoon-map" style="width: 100%; height: 260px; border-radius: 12px; background: #0b1326; overflow: hidden; border: 1px solid #182542;"></div>
+
+      <div class="grid-2 inner-card" style="font-size: 11px;">
+        <div>中心氣壓: <b id="typhoon-p" style="color: #f8fafc;">-- hPa</b></div>
+        <div>最大風速: <b id="typhoon-w" style="color: #f8fafc;">-- m/s</b></div>
+      </div>
+    </div>
+
+    <!-- 底部版權與自動更新計時器 -->
+    <div style="text-align: center; font-size: 11px; color: #64748b; padding-top: 6px;">
+      <p>交通部中央氣象署 (CWA) 開放資料</p>
+      <p id="auto-refresh-countdown" style="margin-top: 4px; color: #475569;">下次自動更新：300 秒後</p>
+    </div>
+
+  </div>
+
+  <script>
+    const API_KEY = 'CWA-70908B9E-9DE2-4B57-B660-5F5EE2089953';
+    let stationsCache = [];
+    let rankMode = 'high';
+    let countdownSec = 300;
+    let typhoonMap = null;
+    let typhoonLayerGroup = null;
+
+    let synopticImageUrl = '';
+    let rainfallImageUrl = '';
+
+    const citySelect = document.getElementById('city-select');
+    const refreshBtn = document.getElementById('refresh-all-btn');
+    const updateStatus = document.getElementById('update-status');
+
+    // 1. 每秒時鐘更新
+    function startClock() {
+      const now = new Date();
+      const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
+      document.getElementById('current-date').textContent = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日 週${weekdays[now.getDay()]}`;
+      document.getElementById('current-time').textContent = `臺灣時間 ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+    }
+    setInterval(startClock, 1000);
+    startClock();
+
+    // 導覽平滑跳轉
+    function scrollToSec(secId, btnEl) {
+      document.querySelectorAll('.nav-tab-btn').forEach(b => b.className = 'btn nav-tab-btn');
+      if (btnEl) btnEl.className = 'btn nav-tab-btn active';
+      const target = document.getElementById(secId);
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+
+    // 2. 抓取地震快訊 (E-A0015-001)
+    async function loadEarthquake() {
+      try {
+        const url = `https://opendata.cwa.gov.tw/api/v1/rest/datastore/E-A0015-001?Authorization=${API_KEY}&limit=1`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.records?.Earthquake?.length) {
+          const eq = data.records.Earthquake[0].EarthquakeInfo;
+          document.getElementById('eq-title').textContent = `顯著有感地震報告 (規模 M${eq.EarthquakeMagnitude.MagnitudeValue})`;
+          document.getElementById('eq-content').textContent = eq.Epicenter.Location;
+          document.getElementById('eq-time').textContent = `發震時間：${eq.OriginTime}`;
+        }
+      } catch (e) {
+        console.warn('地震資料取得略過', e);
+      }
+    }
+
+    // 3. 抓取全台測站資料 (O-A0001-001) 用於極值排行與 GPS 定位
+    async function loadStations() {
+      const icon = document.getElementById('refresh-icon');
+      if (icon) icon.style.transform = 'rotate(180deg)';
+
+      try {
+        const url = `https://opendata.cwa.gov.tw/api/v1/rest/datastore/O-A0001-001?Authorization=${API_KEY}`;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (data.records?.Station) {
+          stationsCache = data.records.Station.filter(s => 
+            s.WeatherElement && 
+            s.WeatherElement.AirTemperature && 
+            parseFloat(s.WeatherElement.AirTemperature) > -40
+          );
+
+          renderRankings();
+          updateGPSLocation();
+
+          const now = new Date();
+          document.getElementById('rank-update-time').textContent = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+        }
+      } catch (err) {
+        console.error('測站資料讀取錯誤', err);
+      } finally {
+        if (icon) icon.style.transform = 'none';
+      }
+    }
+
+    // 4. 渲染極值排行榜 TOP 10 (高溫 / 低溫)
+    function renderRankings() {
+      const container = document.getElementById('ranking-container');
+      if (!stationsCache.length) return;
+
+      const sorted = [...stationsCache].sort((a, b) => {
+        const tA = parseFloat(a.WeatherElement.AirTemperature);
+        const tB = parseFloat(b.WeatherElement.AirTemperature);
+        return rankMode === 'high' ? (tB - tA) : (tA - tB);
+      }).slice(0, 6);
+
+      const isHigh = rankMode === 'high';
+      const color = isHigh ? '#f59e0b' : '#38bdf8';
+      const icon = isHigh ? '🔥' : '❄️';
+
+      container.innerHTML = sorted.map((st, i) => `
+        <div class="inner-card" style="display:flex; flex-direction:column; justify-content:space-between;">
+          <div class="flex-between">
+            <span style="font-weight:bold; font-size:13px; max-width:85px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${st.StationName}</span>
+            <span style="font-size:10px; color:#64748b;">#${i+1}</span>
+          </div>
+          <div style="font-size:18px; font-weight:bold; color:${color}; margin:6px 0;">
+            ${parseFloat(st.WeatherElement.AirTemperature).toFixed(1)} °C
+          </div>
+          <div style="font-size:10px; color:#94a3b8; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+            ${icon} ${st.GeoInfo.CountyName}${st.GeoInfo.TownName || ''}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // 5. GPS 定位離使用者最近的測站
+    function updateGPSLocation() {
+      if (!stationsCache.length) return;
+
+      function setDefault() {
+        const s = stationsCache[0];
+        document.getElementById('loc-station-name').textContent = `${s.StationName} (${s.GeoInfo.CountyName})`;
+        document.getElementById('loc-distance-info').textContent = `代表測站呈現`;
+        document.getElementById('loc-temp').textContent = `${s.WeatherElement.AirTemperature} °C`;
+      }
+
+      if (!navigator.geolocation) {
+        setDefault();
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          const lat = pos.coords.latitude;
+          const lon = pos.coords.longitude;
+          let nearest = null;
+          let minD = Infinity;
+
+          stationsCache.forEach(st => {
+            const sLat = st.GeoInfo.Coordinates[1].StationLatitude;
+            const sLon = st.GeoInfo.Coordinates[0].StationLongitude;
+            const d = Math.hypot(lat - sLat, lon - sLon);
+            if (d < minD) { minD = d; nearest = st; }
+          });
+
+          if (nearest) {
+            document.getElementById('loc-station-name').textContent = `${nearest.StationName} (${nearest.GeoInfo.CountyName})`;
+            document.getElementById('loc-distance-info').textContent = `距離約 ${(minD * 111).toFixed(1)} 公里`;
+            document.getElementById('loc-temp').textContent = `${nearest.WeatherElement.AirTemperature} °C`;
+            document.getElementById('loc-wind').textContent = `風速: ${nearest.WeatherElement.WindSpeed || 0} m/s`;
+            document.getElementById('loc-humidity').textContent = `相對濕度: ${nearest.WeatherElement.RelativeHumidity || 0} %`;
+            const rain = nearest.WeatherElement.Now?.Precipitation ?? 0;
+            document.getElementById('loc-rain').textContent = `日累積雨量: ${rain < 0 ? 0 : rain} mm`;
+          }
+        },
+        () => setDefault(),
+        { timeout: 6000 }
+      );
+    }
+
+    // 6. 抓取縣市 36 小時預報 (F-C0032-001)
+    function getTimePeriodLabel(startTimeStr, index) {
+      const date = new Date(startTimeStr);
+      const hour = date.getHours();
+      if (index === 0) return (hour >= 6 && hour < 18) ? '今日白天' : '今晚明晨';
+      if (index === 1) return (hour >= 6 && hour < 18) ? '明日白天' : '明日夜間';
+      return (hour >= 6 && hour < 18) ? '後天白天' : '後天夜間';
+    }
+
+    async function loadCityForecast(cityName) {
+      try {
+        const url = `https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-C0032-001?Authorization=${API_KEY}&locationName=${encodeURIComponent(cityName)}`;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (data.records?.location?.[0]) {
+          const elems = data.records.location[0].weatherElement;
+          const wxElem = elems.find(e => e.elementName === 'Wx');
+          const popElem = elems.find(e => e.elementName === 'PoP');
+          const minTElem = elems.find(e => e.elementName === 'MinT');
+          const maxTElem = elems.find(e => e.elementName === 'MaxT');
+          const ciElem = elems.find(e => e.elementName === 'CI');
+
+          // 首個時段大卡
+          const wx = wxElem.time[0].parameter.parameterName;
+          const pop = popElem.time[0].parameter.parameterName;
+          const minT = minTElem.time[0].parameter.parameterName;
+          const maxT = maxTElem.time[0].parameter.parameterName;
+          const ci = ciElem.time[0].parameter.parameterName;
+
+          document.getElementById('card-city-title').textContent = `${cityName} | 天氣即時資訊`;
+          document.getElementById('wx-text').textContent = wx;
+          document.getElementById('pop-value').textContent = `${pop}%`;
+          document.getElementById('ci-value').textContent = ci;
+          document.getElementById('max-temp').textContent = `${maxT} °C`;
+          document.getElementById('min-temp').textContent = `${minT} °C`;
+
+          let icon = '🌤️';
+          if (wx.includes('雨')) icon = '🌧️';
+          else if (wx.includes('晴')) icon = '☀️';
+          else if (wx.includes('陰')) icon = '☁️';
+          document.getElementById('wx-icon').textContent = icon;
+
+          // 三時段小卡
+          const container36h = document.getElementById('forecast-36h-container');
+          container36h.innerHTML = [0, 1, 2].map(idx => {
+            const periodWx = wxElem.time[idx]?.parameter.parameterName || '--';
+            const periodPop = popElem.time[idx]?.parameter.parameterName || '--';
+            const periodMin = minTElem.time[idx]?.parameter.parameterName || '--';
+            const periodMax = maxTElem.time[idx]?.parameter.parameterName || '--';
+            const label = getTimePeriodLabel(wxElem.time[idx]?.startTime, idx);
+
+            let subIcon = '🌤️';
+            if (periodWx.includes('雨')) subIcon = '🌧️';
+            else if (periodWx.includes('晴')) subIcon = '☀️';
+            else if (periodWx.includes('陰')) subIcon = '☁️';
+
+            return `
+              <div class="inner-card" style="text-align: center; padding: 10px 4px;">
+                <div class="text-dim" style="font-weight: bold; margin-bottom: 4px;">${label}</div>
+                <div style="font-size: 20px; margin: 4px 0;">${subIcon}</div>
+                <div style="font-size: 11px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 2px;">
+                  ${periodWx}
+                </div>
+                <div style="font-size: 12px; font-weight: 800; color: #f8fafc; margin-top: 4px;">
+                  ${periodMin}°~${periodMax}°
+                </div>
+                <div style="font-size: 10px; color: #38bdf8; margin-top: 2px;">
+                  💧 ${periodPop}%
+                </div>
+              </div>
+            `;
+          }).join('');
+        }
+      } catch (e) {
+        console.error('縣市預報讀取失敗', e);
+      }
+    }
+
+    // 7. 代表測站 6 宮格 (截圖 10)
+    async function loadCityObservation(cityName) {
+      try {
+        const url = `https://opendata.cwa.gov.tw/api/v1/rest/datastore/O-A0001-001?Authorization=${API_KEY}&StationCountyName=${encodeURIComponent(cityName)}`;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (data.records?.Station?.length > 0) {
+          const st = data.records.Station[0];
+          const elem = st.WeatherElement;
+
+          document.getElementById('obs-station-name').textContent = `代表性測站：${st.StationName}`;
+          document.getElementById('obs-station-id').textContent = `ID: ${st.StationId}`;
+          document.getElementById('obs-temp').textContent = elem.AirTemperature ? `${elem.AirTemperature} °C` : '-- °C';
+          document.getElementById('obs-wind').textContent = elem.WindSpeed ? `${elem.WindSpeed} m/s` : '-- m/s';
+          document.getElementById('obs-dir').textContent = elem.WindDirection !== undefined ? `${elem.WindDirection}°` : '--°';
+          document.getElementById('obs-humidity').textContent = elem.RelativeHumidity ? `${elem.RelativeHumidity}%` : '--%';
+          
+          const rain = elem.Now?.Precipitation ?? 0;
+          document.getElementById('obs-rain').textContent = `${rain < 0 ? 0 : rain} mm`;
+
+          if (st.ObsTime?.DateTime) {
+            const timeStr = st.ObsTime.DateTime.split('T')[1].substring(0, 5);
+            document.getElementById('obs-time').textContent = timeStr;
+          }
+        }
+      } catch (e) {
+        console.error('代表測站讀取失敗', e);
+      }
+    }
+
+    // 8. 抓取天氣圖 (F-C0035-003) 與降水預報 (F-C0035-015)
+    async function loadWeatherCharts() {
+      // (1) 地面天氣圖
+      try {
+        const urlSynoptic = `https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-C0035-003?Authorization=${API_KEY}`;
+        const res = await fetch(urlSynoptic);
+        const data = await res.json();
+        const imgUri = data.records?.record?.[0]?.dataset?.resource?.uri || data.records?.location?.[0]?.weatherElement?.[0]?.url;
+        synopticImageUrl = imgUri || 'https://www.cwa.gov.tw/Data/weather/analysis/surface/SFC_84.jpg';
+        document.getElementById('weather-image').src = synopticImageUrl;
+      } catch (e) {
+        synopticImageUrl = 'https://www.cwa.gov.tw/Data/weather/analysis/surface/SFC_84.jpg';
+        document.getElementById('weather-image').src = synopticImageUrl;
+      }
+
+      // (2) 降水預報圖
+      try {
+        const urlRain = `https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-C0035-015?Authorization=${API_KEY}`;
+        const res = await fetch(urlRain);
+        const data = await res.json();
+        const imgUri = data.records?.record?.[0]?.dataset?.resource?.uri;
+        rainfallImageUrl = imgUri || 'https://www.cwa.gov.tw/Data/rainfall/QPF_ChRFC_12hr_06.jpg';
+      } catch (e) {
+        rainfallImageUrl = 'https://www.cwa.gov.tw/Data/rainfall/QPF_ChRFC_12hr_06.jpg';
+      }
+    }
+
+    // 天氣圖頁籤切換
+    document.getElementById('btn-chart-synoptic').addEventListener('click', function() {
+      this.className = 'btn btn-active';
+      document.getElementById('btn-chart-rainfall').className = 'btn btn-ghost';
+      document.getElementById('weather-image').src = synopticImageUrl;
+      document.getElementById('chart-desc').textContent = '最新地面天氣圖 (F-C0035-003)';
+    });
+
+    document.getElementById('btn-chart-rainfall').addEventListener('click', function() {
+      this.className = 'btn btn-active';
+      document.getElementById('btn-chart-synoptic').className = 'btn btn-ghost';
+      document.getElementById('weather-image').src = rainfallImageUrl;
+      document.getElementById('chart-desc').textContent = '定量降水預報圖 (F-C0035-015)';
+    });
+
+    // 9. 颱風動態模組 (Leaflet + W-C0034-005)
+    function initTyphoonMap() {
+      if (typhoonMap || typeof L === 'undefined') return;
+      typhoonMap = L.map('typhoon-map', { zoomControl: false }).setView([22.5, 126.0], 5);
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}').addTo(typhoonMap);
+      typhoonLayerGroup = L.layerGroup().addTo(typhoonMap);
+    }
+
+    async function loadTyphoonData() {
+      initTyphoonMap();
+      try {
+        const url = `https://opendata.cwa.gov.tw/api/v1/rest/datastore/W-C0034-005?Authorization=${API_KEY}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        const tcs = data.records?.tropicalCyclones?.tropicalCyclone;
+
+        if (tcs && tcs.length > 0) {
+          const tc = tcs[0];
+          const latestFix = tc.analysisData?.fix?.[tc.analysisData.fix.length - 1];
+          document.getElementById('typhoon-name').textContent = `${tc.typhoonName} (${tc.englishName || ''})`;
+          document.getElementById('typhoon-badge').textContent = tc.classification || '颱風';
+
+          if (latestFix) {
+            const lat = parseFloat(latestFix.coordinateLat);
+            const lon = parseFloat(latestFix.coordinateLon);
+            document.getElementById('typhoon-p').textContent = `${latestFix.pressure || '--'} hPa`;
+            document.getElementById('typhoon-w').textContent = `${latestFix.maxWindSpeed || '--'} m/s`;
+
+            typhoonLayerGroup.clearLayers();
+            L.circleMarker([lat, lon], { radius: 6, color: '#ef4444', fillColor: '#fff', fillOpacity: 1 }).addTo(typhoonLayerGroup);
+            L.circle([lat, lon], { radius: 180000, color: '#f87171', fillColor: '#ef4444', fillOpacity: 0.25 }).addTo(typhoonLayerGroup);
+            typhoonMap.setView([lat, lon], 5);
+          }
+        } else {
+          // 當前無颱風活動
+          document.getElementById('typhoon-name').textContent = '目前洋面無颱風活動';
+          document.getElementById('typhoon-badge').textContent = '良好';
+          document.getElementById('typhoon-p').textContent = '1012 hPa';
+          document.getElementById('typhoon-w').textContent = '< 15 m/s';
+        }
+      } catch (e) {
+        document.getElementById('typhoon-name').textContent = '目前洋面無颱風活動';
+        document.getElementById('typhoon-badge').textContent = '良好';
+      }
+    }
+
+    // 排行榜按鈕切換
+    document.getElementById('rank-tab-high').addEventListener('click', function() {
+      rankMode = 'high';
+      this.className = 'btn btn-active';
+      document.getElementById('rank-tab-low').className = 'btn btn-ghost';
+      renderRankings();
+    });
+    document.getElementById('rank-tab-low').addEventListener('click', function() {
+      rankMode = 'low';
+      this.className = 'btn btn-active';
+      document.getElementById('rank-tab-high').className = 'btn btn-ghost';
+      renderRankings();
+    });
+
+    // 總更新程序
+    async function updateAll() {
+      countdownSec = 300;
+      const city = citySelect.value;
+      updateStatus.textContent = `已選擇：${city} | 正在更新所有資料...`;
+
+      await Promise.all([
+        loadEarthquake(),
+        loadStations(),
+        loadCityForecast(city),
+        loadCityObservation(city),
+        loadWeatherCharts(),
+        loadTyphoonData()
+      ]);
+
+      const now = new Date();
+      const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      updateStatus.textContent = `已選擇：${city} | 更新完成 ${timeStr}`;
+    }
+
+    // 事件監聽
+    citySelect.addEventListener('change', () => {
+      loadCityForecast(citySelect.value);
+      loadCityObservation(citySelect.value);
+    });
+    refreshBtn.addEventListener('click', updateAll);
+    document.getElementById('locate-btn').addEventListener('click', updateGPSLocation);
+
+    // 每 5 分鐘自動刷新排程
+    setInterval(() => {
+      countdownSec--;
+      if (countdownSec <= 0) {
+        updateAll();
+      }
+      document.getElementById('auto-refresh-countdown').textContent = `下次自動更新：${countdownSec} 秒後`;
+    }, 1000);
+
+    // 啟動載入
+    updateAll();
+  </script>
+</body>
+</html>
